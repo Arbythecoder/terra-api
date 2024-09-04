@@ -1,0 +1,49 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+
+      - name: Install dependencies
+        run: |
+          pip install -r src/requirements.txt
+
+      - name: Build Docker image
+        run: |
+          docker build -t gcr.io/learning-app-434415/flask-api:latest src/
+
+      - name: Authenticate with GCR and GKE
+        uses: actions/setup-google-cloud@v1
+        with:
+          service_key_file: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Push Docker image
+        run: |
+          docker push gcr.io/learning-app-434415/flask-api:latest
+
+      - name: Deploy to GKE
+        run: |
+          gcloud container clusters get-credentials flask-cluster --region us-central1 --project learning-app-434415
+          gcloud container clusters deploy flask-api --image gcr.io/learning-app-434415/flask-api:latest --update-labels deployment.kubernetes.io/revision=1 --namespace default --cluster flask-cluster
+
+          run: |
+          kubectl config set-cluster gke_cluster --server=${{ secrets.GKE_CLUSTER_URL }} --certificate-authority=${{ secrets.GKE_CA }}
+          kubectl config set-credentials gke_user --token=${{ secrets.GKE_TOKEN }}
+          kubectl config set-context gke_context --cluster=gke_cluster --user=gke_user --namespace=default
+          kubectl config use-context gke_context
+          kubectl apply -f k8s/
